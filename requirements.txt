@@ -1,0 +1,13 @@
+# ============================================
+# Dependências do Projeto Multi-Agents
+# ============================================
+
+# LangChain - Framework base para interação com LLMs
+langchain>=0.3.0
+langchain-groq>=0.2.0
+
+# LangGraph - Orquestração de agentes via grafos de estado
+langgraph>=0.2.0
+
+# Variáveis de ambiente
+python-dotenv>=1.0.0
