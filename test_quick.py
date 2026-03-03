@@ -1,9 +1,19 @@
-"""Script de teste rápido para o Planejador (Fase 2)."""
+"""
+Script de teste rápido — Fase 3: Planejador + Executor via LangGraph
+=====================================================================
 
-from src.agents.planner import planner_node
+Diferença da Fase 2:
+  - Antes: planner_node(state) ← chamada direta
+  - Agora: workflow.invoke(state) ← grafo orquestra os agentes
+
+O grafo garante: Planejador roda primeiro → Executor roda depois.
+O estado compartilhado carrega os dados entre eles.
+"""
+
+from src.graph.workflow import build_workflow
 
 state = {
-    "objective": "Criar um artigo sobre inteligencia artificial",
+    "objective": "Criar um guia rapido sobre como usar Git",
     "plan": "",
     "result": "",
     "feedback": "",
@@ -13,16 +23,24 @@ state = {
     "history": [],
 }
 
-print("Chamando o Planejador...")
-result = planner_node(state)
+print("Construindo grafo: Planejador -> Executor")
+workflow = build_workflow()
+
+print("Executando grafo...\n")
+final_state = workflow.invoke(state)
+
+print("=" * 60)
+print("PLANO (escrito pelo Planejador):")
+print("=" * 60)
+print(final_state["plan"])
 
 print("\n" + "=" * 60)
-print("PLANO GERADO:")
+print("RESULTADO (escrito pelo Executor):")
 print("=" * 60)
-print(result["plan"])
+print(final_state["result"])
 
 print("\n" + "=" * 60)
-print("HISTORICO:")
+print("HISTORICO (rastreabilidade):")
 print("=" * 60)
-for h in result["history"]:
-    print(h)
+for h in final_state["history"]:
+    print(f"\n{h}")
