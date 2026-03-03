@@ -4,61 +4,35 @@ Agente Validador
 
 Responsabilidade: Avaliar se o resultado do Executor atende ao objetivo original.
 
-CONCEITO — O PAPEL DO VALIDADOR NO SISTEMA
+CONCEITO — O PAPEL DO VALIDADOR
+    Controle de qualidade. Sem ele, qualquer resultado passaria.
+    Com ele, o sistema ganha AUTO-CORREÇÃO via loop de feedback.
 
-    O Validador é o "controle de qualidade" do sistema. Sem ele, qualquer 
-    resultado passaria — bom ou ruim. Com ele, o sistema ganha a capacidade
-    de AUTO-CORREÇÃO: se o resultado não é bom, o Validador rejeita e o 
-    fluxo volta ao Planejador com feedback específico.
-
-    Isso cria um loop de melhoria:
-    
-    Iteração 1: Plano genérico → Resultado raso → Validador rejeita
-    Iteração 2: Plano ajustado (com feedback) → Resultado melhor → Validador aprova
-
-    É o mesmo princípio de code review:
-    - Desenvolvedor escreve código (Executor)
-    - Reviewer avalia (Validador)
-    - Se reprovado, dev corrige (Planejador replaneja)
-
-DECISÃO DE DESIGN — PARSING DO OUTPUT
-
-    O Validador precisa retornar dados ESTRUTURADOS (is_approved, feedback).
-    Mas a LLM retorna texto livre. Precisamos fazer parsing.
-
-    Alternativas:
-    1. JSON mode da LLM → Mais confiável, mas nem todo modelo suporta bem
-    2. Parsing com regex → Simples, funciona com qualquer modelo
-    3. Output parser do LangChain → Mais robusto, mais complexo
-
-    Escolhemos regex (opção 2) por ser:
-    - Transparente (você vê exatamente o que acontece)
-    - Educativo (mostra o problema real de parsing de LLMs)
-    - Resistente a variações de formato
+FASE 5 — O QUE MUDOU?
+    - Logging estruturado com métricas
+    - Tratamento de erros
+    - Log de WARNING quando parsing falha (fail-safe)
 """
 
 import re
+import time
 
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from src.config.settings import GROQ_API_KEY, MODEL_NAME, MODEL_TEMPERATURE
 from src.config.prompts import VALIDATOR_PROMPT
+from src.config.logging_config import get_logger
 from src.state.agent_state import AgentState
+
+logger = get_logger("validator")
 
 
 def build_validator_llm() -> ChatGroq:
-    """
-    Cria a instância da LLM usada pelo Validador.
-
-    Nota: Usamos temperatura MAIS BAIXA para o Validador.
-    Por quê? Queremos avaliações consistentes e previsíveis.
-    Se o Validador for "criativo", pode aprovar um resultado ruim
-    ou reprovar um bom — dependendo do "humor" da LLM.
-    """
+    """Cria a LLM do Validador (temperatura baixa para consistência)."""
     return ChatGroq(
         model=MODEL_NAME,
-        temperature=0.3,  # Mais baixa que os outros agentes — queremos consistência
+        temperature=0.3,
         api_key=GROQ_API_KEY,
     )
 
@@ -66,24 +40,17 @@ def build_validator_llm() -> ChatGroq:
 def parse_approval(response_text: str) -> bool:
     """
     Extrai a decisão de aprovação do texto do Validador.
-
-    Procura por "APROVADO: sim" ou "APROVADO: não" no texto.
-    Se não encontrar, assume NÃO aprovado (fail-safe).
-
-    CONCEITO — FAIL-SAFE vs FAIL-OPEN:
-        - Fail-safe: na dúvida, rejeita (mais qualidade, mais iterações)
-        - Fail-open: na dúvida, aprova (menos iterações, menos qualidade)
-        Escolhemos fail-safe porque preferimos gastar uma iteração extra
-        do que entregar um resultado ruim.
+    Fail-safe: se não encontrar o padrão, rejeita.
     """
-    # Procura "APROVADO: sim" (case insensitive)
     match = re.search(r"APROVADO:\s*(sim|não|nao|yes|no)", response_text, re.IGNORECASE)
 
     if match:
         value = match.group(1).lower()
-        return value in ("sim", "yes")
+        approved = value in ("sim", "yes")
+        logger.debug(f"Parsing encontrou 'APROVADO: {value}' -> {approved}")
+        return approved
 
-    # Se não encontrou o padrão, fail-safe: não aprovado
+    logger.warning("Parsing nao encontrou padrao 'APROVADO: sim/nao' — usando fail-safe (reprovado)")
     return False
 
 
@@ -93,40 +60,50 @@ def validator_node(state: AgentState) -> dict:
 
     Recebe: Estado com 'objective', 'plan' e 'result' preenchidos
     Retorna: {"feedback": "...", "is_approved": bool, "history": [...]}
-
-    IMPORTANTE: Este nó depende do Executor ter rodado antes.
-    O grafo garante isso via a aresta Executor → Validador.
     """
-    # 1. Monta o prompt com os dados do estado
+    iteration = state.get("iteration", 1)
+    logger.info(f"Iniciando avaliacao (iteracao {iteration})")
+
+    # Monta o prompt
     prompt = VALIDATOR_PROMPT.format(
         objective=state["objective"],
         plan=state["plan"],
         result=state["result"],
-        iteration=state.get("iteration", 1),
+        iteration=iteration,
         max_iterations=state.get("max_iterations", 3),
     )
 
-    # 2. Chama a LLM
-    llm = build_validator_llm()
-    response = llm.invoke([
-        SystemMessage(content=prompt),
-        HumanMessage(content="Avalie o resultado produzido."),
-    ])
+    # Chama a LLM com tratamento de erros
+    try:
+        llm = build_validator_llm()
+        start_time = time.time()
 
-    feedback = response.content
+        response = llm.invoke([
+            SystemMessage(content=prompt),
+            HumanMessage(content="Avalie o resultado produzido."),
+        ])
 
-    # 3. Extrai a decisão de aprovação do texto
+        elapsed = time.time() - start_time
+        feedback = response.content
+
+        logger.info(f"Avaliacao gerada em {elapsed:.2f}s ({len(feedback)} chars)")
+
+    except Exception as e:
+        logger.error(f"Erro ao chamar LLM: {e}", exc_info=True)
+        feedback = f"[ERRO] Falha na validação: {str(e)}\nAPROVADO: não"
+
+    # Extrai a decisão
     is_approved = parse_approval(feedback)
+    status = "APROVADO" if is_approved else "REPROVADO"
+    logger.info(f"Decisao: {status}")
 
-    # 4. Atualiza o histórico
+    # Atualiza o histórico
     history = state.get("history", [])
-    iteration = state.get("iteration", 1)
-    status = "APROVADO ✓" if is_approved else "REPROVADO ✗"
+    status_icon = "APROVADO ✓" if is_approved else "REPROVADO ✗"
     history = history + [
-        f"[Iteração {iteration}] Validador: {status}\n{feedback[:300]}..."
+        f"[Iteração {iteration}] Validador: {status_icon}\n{feedback[:300]}..."
     ]
 
-    # 5. Retorna os campos que este nó modifica
     return {
         "feedback": feedback,
         "is_approved": is_approved,

@@ -2,49 +2,54 @@
 Ponto de Entrada do Sistema Multi-Agentes
 ==========================================
 
-FASE ATUAL: Fase 4 — Sistema completo com 4 agentes + loop condicional
+FASE ATUAL: Fase 5 — Sistema completo com observabilidade e logging
 
 EVOLUÇÃO:
     Fase 2: planner_node(state) ← chamada direta, sem grafo
     Fase 3: workflow.invoke(state) ← grafo com 2 agentes (linear)
-    Fase 4: workflow.invoke(state) ← grafo com 4 agentes + loop ← ESTAMOS AQUI
+    Fase 4: workflow.invoke(state) ← grafo com 4 agentes + loop
+    Fase 5: workflow.invoke(state) ← + logging + métricas + erros ← ESTAMOS AQUI
 """
 
 from src.config.settings import validate_config
+from src.config.logging_config import setup_logging, get_logger
+from src.config.observer import ExecutionMetrics
 from src.graph.workflow import build_workflow
 
 
 def main():
     """
-    Executa o sistema completo de 4 agentes via LangGraph.
+    Executa o sistema completo com observabilidade.
 
-    Fluxo:
-        Planejador → Executor → Validador → [Aprovado?]
-            ▲                                    │
-            └──── increment ◄── (não aprovado) ──┘
-                                    │
-                              (aprovado) → END
-
-    O código aqui NÃO controla o fluxo. O grafo decide tudo.
-    Nós apenas passamos o estado inicial e recebemos o final.
+    Novidades da Fase 5:
+    - Logging estruturado (console + arquivo)
+    - Métricas de tempo por nó
+    - Tratamento de erros global
+    - Arquivo de log em logs/execution_YYYYMMDD_HHMMSS.log
     """
+    # Inicializa logging ANTES de tudo
+    setup_logging(level="INFO", log_to_file=True)
+    logger = get_logger("main")
+
     print("=" * 60)
-    print("🤖 Sistema Multi-Agentes — Fase 4: Sistema Completo")
+    print("  Sistema Multi-Agentes — Fase 5: Producao")
     print("=" * 60)
 
     # Valida configuração
     validate_config()
 
     # Pede o objetivo ao usuário
-    print("\n📝 Digite o objetivo para o sistema resolver:")
-    print("   (Exemplo: 'Criar um artigo sobre inteligência artificial')\n")
-    objective = input("🎯 Objetivo: ").strip()
+    print("\n  Digite o objetivo para o sistema resolver:")
+    print("  (Exemplo: 'Criar um artigo sobre inteligencia artificial')\n")
+    objective = input("  Objetivo: ").strip()
 
     if not objective:
-        objective = "Criar um artigo sobre inteligência artificial"
-        print(f"   (Usando objetivo padrão: '{objective}')")
+        objective = "Criar um artigo sobre inteligencia artificial"
+        print(f"  (Usando objetivo padrao: '{objective}')")
 
-    # Estado inicial — o grafo vai preenchendo conforme os agentes rodam
+    logger.info(f"Objetivo recebido: {objective}")
+
+    # Estado inicial
     initial_state = {
         "objective": objective,
         "plan": "",
@@ -57,46 +62,69 @@ def main():
     }
 
     # Constrói o grafo
-    print("\n🔧 Construindo grafo: Planejador → Executor → Validador → [Orquestrador]")
+    logger.info("Construindo grafo de agentes")
     workflow = build_workflow()
 
-    # Executa o grafo inteiro com loop de auto-correção
-    print("⏳ Executando grafo (máximo 3 iterações)...\n")
-    final_state = workflow.invoke(initial_state)
+    # Métricas de execução
+    metrics = ExecutionMetrics()
+    metrics.start()
 
-    # Mostra os resultados
+    # Executa o grafo com tratamento de erros global
+    logger.info("Iniciando execucao do grafo")
+    print("\n  Executando grafo (maximo 3 iteracoes)...\n")
+
+    try:
+        final_state = workflow.invoke(initial_state)
+        logger.info("Grafo executado com sucesso")
+    except Exception as e:
+        logger.critical(f"Erro fatal na execucao do grafo: {e}", exc_info=True)
+        print(f"\n  ERRO FATAL: {e}")
+        print("  Verifique o arquivo de log em logs/ para detalhes.")
+        return
+
+    # Registra métricas (tempo total)
+    # Os tempos individuais são logados por cada agente
+    logger.info(f"Tempo total de execucao: {metrics.total_time:.2f}s")
+
+    # === EXIBIÇÃO DOS RESULTADOS ===
+
     print("\n" + "=" * 60)
-    print("📋 PLANO FINAL (última versão do Planejador)")
+    print("  PLANO FINAL")
     print("=" * 60)
     print(final_state["plan"])
 
     print("\n" + "=" * 60)
-    print("📄 RESULTADO FINAL (última versão do Executor)")
+    print("  RESULTADO FINAL")
     print("=" * 60)
     print(final_state["result"])
 
     print("\n" + "=" * 60)
-    print("✅ VALIDAÇÃO")
+    print("  VALIDACAO")
     print("=" * 60)
-    status = "APROVADO ✓" if final_state["is_approved"] else "NÃO APROVADO ✗ (limite de iterações)"
-    print(f"   Status: {status}")
-    print(f"   Iterações usadas: {final_state['iteration']}/{final_state['max_iterations']}")
+    status = "APROVADO" if final_state["is_approved"] else "NAO APROVADO (limite de iteracoes)"
+    print(f"  Status: {status}")
+    print(f"  Iteracoes usadas: {final_state['iteration']}/{final_state['max_iterations']}")
 
     print("\n" + "=" * 60)
-    print("💬 FEEDBACK DO VALIDADOR")
+    print("  FEEDBACK DO VALIDADOR")
     print("=" * 60)
     print(final_state["feedback"])
 
     print("\n" + "=" * 60)
-    print("📜 HISTÓRICO COMPLETO (rastreabilidade)")
+    print("  HISTORICO COMPLETO")
     print("=" * 60)
     for i, entry in enumerate(final_state["history"], 1):
         print(f"\n--- Entrada {i} ---")
         print(entry)
 
+    # Métricas finais
+    print(f"\n  Tempo total: {metrics.total_time:.2f}s")
+    print("  Log salvo em: logs/")
+
+    logger.info("Execucao finalizada com sucesso")
+
     print("\n" + "=" * 60)
-    print("✅ Fase 4 completa! Sistema com 4 agentes funcionando.")
-    print("   Planejador → Executor → Validador → Orquestrador (loop)")
+    print("  Sistema Multi-Agentes — Todas as fases completas!")
     print("=" * 60)
 
 

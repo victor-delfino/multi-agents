@@ -1,6 +1,9 @@
 # Environment variables (NUNCA commitar!)
 .env
 
+# Logs de execução
+logs/
+
 # Python
 __pycache__/
 *.py[cod]
