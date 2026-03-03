@@ -1,19 +1,19 @@
 """
-Script de teste rápido — Fase 3: Planejador + Executor via LangGraph
-=====================================================================
+Script de teste rápido — Fase 4: Sistema completo com 4 agentes
+================================================================
 
-Diferença da Fase 2:
-  - Antes: planner_node(state) ← chamada direta
-  - Agora: workflow.invoke(state) ← grafo orquestra os agentes
+Fluxo: Planejador → Executor → Validador → [Aprovado?] → END ou retry
 
-O grafo garante: Planejador roda primeiro → Executor roda depois.
-O estado compartilhado carrega os dados entre eles.
+Observe no output:
+- Quantas iterações o sistema precisou
+- O que o Validador criticou
+- Como o Planejador adaptou o plano no retry
 """
 
 from src.graph.workflow import build_workflow
 
 state = {
-    "objective": "Criar um guia rapido sobre como usar Git",
+    "objective": "Criar uma lista com 3 dicas praticas para aprender Python",
     "plan": "",
     "result": "",
     "feedback": "",
@@ -23,24 +23,37 @@ state = {
     "history": [],
 }
 
-print("Construindo grafo: Planejador -> Executor")
+print("Construindo grafo: Planejador -> Executor -> Validador -> [Orquestrador]")
 workflow = build_workflow()
 
-print("Executando grafo...\n")
+print("Executando grafo (maximo 3 iteracoes)...\n")
 final_state = workflow.invoke(state)
 
-print("=" * 60)
-print("PLANO (escrito pelo Planejador):")
+print("\n" + "=" * 60)
+print("PLANO FINAL:")
 print("=" * 60)
 print(final_state["plan"])
 
 print("\n" + "=" * 60)
-print("RESULTADO (escrito pelo Executor):")
+print("RESULTADO FINAL:")
 print("=" * 60)
 print(final_state["result"])
 
 print("\n" + "=" * 60)
-print("HISTORICO (rastreabilidade):")
+print("VALIDACAO:")
 print("=" * 60)
-for h in final_state["history"]:
-    print(f"\n{h}")
+status = "APROVADO" if final_state["is_approved"] else "NAO APROVADO (limite)"
+print(f"Status: {status}")
+print(f"Iteracoes: {final_state['iteration']}/{final_state['max_iterations']}")
+
+print("\n" + "=" * 60)
+print("FEEDBACK DO VALIDADOR:")
+print("=" * 60)
+print(final_state["feedback"])
+
+print("\n" + "=" * 60)
+print("HISTORICO COMPLETO:")
+print("=" * 60)
+for i, h in enumerate(final_state["history"], 1):
+    print(f"\n--- Entrada {i} ---")
+    print(h)

@@ -2,13 +2,12 @@
 Ponto de Entrada do Sistema Multi-Agentes
 ==========================================
 
-FASE ATUAL: Fase 3 — Planejador + Executor conectados via LangGraph
-PRÓXIMA FASE: Fase 4 — + Validador + Orquestrador (loop condicional)
+FASE ATUAL: Fase 4 — Sistema completo com 4 agentes + loop condicional
 
 EVOLUÇÃO:
     Fase 2: planner_node(state) ← chamada direta, sem grafo
-    Fase 3: workflow.invoke(state) ← grafo orquestra 2 agentes   ← ESTAMOS AQUI
-    Fase 4: workflow.invoke(state) ← grafo com 4 agentes + loop
+    Fase 3: workflow.invoke(state) ← grafo com 2 agentes (linear)
+    Fase 4: workflow.invoke(state) ← grafo com 4 agentes + loop ← ESTAMOS AQUI
 """
 
 from src.config.settings import validate_config
@@ -17,16 +16,20 @@ from src.graph.workflow import build_workflow
 
 def main():
     """
-    Executa o grafo Planejador → Executor via LangGraph.
+    Executa o sistema completo de 4 agentes via LangGraph.
 
-    ANTES (Fase 2): chamávamos planner_node() diretamente
-    AGORA (Fase 3): chamamos workflow.invoke() — o grafo decide a ordem
+    Fluxo:
+        Planejador → Executor → Validador → [Aprovado?]
+            ▲                                    │
+            └──── increment ◄── (não aprovado) ──┘
+                                    │
+                              (aprovado) → END
 
-    A diferença? Agora NÃO controlamos quem roda quando.
-    O grafo cuida disso. Só passamos o estado inicial.
+    O código aqui NÃO controla o fluxo. O grafo decide tudo.
+    Nós apenas passamos o estado inicial e recebemos o final.
     """
     print("=" * 60)
-    print("🤖 Sistema Multi-Agentes — Fase 3: Planejador + Executor")
+    print("🤖 Sistema Multi-Agentes — Fase 4: Sistema Completo")
     print("=" * 60)
 
     # Valida configuração
@@ -54,38 +57,46 @@ def main():
     }
 
     # Constrói o grafo
-    print("\n🔧 Construindo grafo: Planejador → Executor")
+    print("\n🔧 Construindo grafo: Planejador → Executor → Validador → [Orquestrador]")
     workflow = build_workflow()
 
-    # Executa o grafo inteiro
-    # O LangGraph vai:
-    # 1. Rodar planner_node(state) → atualizar state com "plan"
-    # 2. Rodar executor_node(state) → atualizar state com "result"
-    # 3. Retornar o estado final completo
-    print("⏳ Executando grafo...\n")
+    # Executa o grafo inteiro com loop de auto-correção
+    print("⏳ Executando grafo (máximo 3 iterações)...\n")
     final_state = workflow.invoke(initial_state)
 
     # Mostra os resultados
-    print("=" * 60)
-    print("📋 PLANO (gerado pelo Planejador)")
+    print("\n" + "=" * 60)
+    print("📋 PLANO FINAL (última versão do Planejador)")
     print("=" * 60)
     print(final_state["plan"])
 
     print("\n" + "=" * 60)
-    print("📄 RESULTADO (gerado pelo Executor)")
+    print("📄 RESULTADO FINAL (última versão do Executor)")
     print("=" * 60)
     print(final_state["result"])
 
     print("\n" + "=" * 60)
-    print("📜 HISTÓRICO (rastreabilidade do fluxo)")
+    print("✅ VALIDAÇÃO")
     print("=" * 60)
-    for entry in final_state["history"]:
-        print(f"\n{entry}")
+    status = "APROVADO ✓" if final_state["is_approved"] else "NÃO APROVADO ✗ (limite de iterações)"
+    print(f"   Status: {status}")
+    print(f"   Iterações usadas: {final_state['iteration']}/{final_state['max_iterations']}")
 
     print("\n" + "=" * 60)
-    print("✅ Fase 3 completa!")
-    print("   O Planejador criou o plano → O Executor executou → Resultado gerado")
-    print("   Próximo: Fase 4 — Validador + loop condicional")
+    print("💬 FEEDBACK DO VALIDADOR")
+    print("=" * 60)
+    print(final_state["feedback"])
+
+    print("\n" + "=" * 60)
+    print("📜 HISTÓRICO COMPLETO (rastreabilidade)")
+    print("=" * 60)
+    for i, entry in enumerate(final_state["history"], 1):
+        print(f"\n--- Entrada {i} ---")
+        print(entry)
+
+    print("\n" + "=" * 60)
+    print("✅ Fase 4 completa! Sistema com 4 agentes funcionando.")
+    print("   Planejador → Executor → Validador → Orquestrador (loop)")
     print("=" * 60)
 
 
